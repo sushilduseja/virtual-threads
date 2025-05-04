@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Virtual Threads Performance Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+            margin: 20px;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f8f9fa;
+        }
+        h1, h2, h3 {
+            color: #343a40;
+            border-bottom: 1px solid #dee2e6;
+            padding-bottom: 5px;
+            margin-top: 30px;
+        }
+        .dashboard {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px; /* Added gap for better spacing */
+            justify-content: center; /* Center charts horizontally */
+        }
+        .chart-container {
+            width: 100%; /* Full width on smaller screens */
+            max-width: 550px; /* Max width per chart */
+            height: 400px;
+            margin: 10px;
+            padding: 15px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .metrics, .observations {
+            background-color: #fff;
+            padding: 20px;
+            margin-top: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .metrics ul, .observations ul {
+            list-style: none;
+            padding: 0;
+        }
+        .metrics li, .observations li {
+            margin-bottom: 10px;
+        }
+        .metrics li strong, .observations li strong {
+            color: #007bff;
+        }
+
+        /* Responsive adjustments */
+        @media (min-width: 1200px) {
+            .chart-container {
+                width: calc(50% - 40px); /* Two charts per row on larger screens */
+            }
+        }
+         @media (max-width: 600px) {
+             h1 { font-size: 1.5em; }
+             h2 { font-size: 1.2em; }
+         }
+    </style>
+</head>
+<body>
+<h1>Virtual Threads vs Platform Threads Performance</h1>
+
+<div class="dashboard">
+    <div class="chart-container">
+        <h2>Basic Test (50 APIs, 100ms delay)</h2>
+        <canvas id="basicExecutionTimeChart"></canvas>
+    </div>
+    <div class="chart-container">
+        <h2>Scalability Test (Execution Time vs API Count)</h2>
+        <canvas id="scalabilityChart"></canvas>
+    </div>
+    <div class="chart-container">
+        <h2>Load Test: Throughput Comparison</h2>
+        <canvas id="loadTestThroughputChart"></canvas>
+    </div>
+    <div class="chart-container">
+        <h2>Load Test: Average Response Time</h2>
+        <canvas id="loadTestAvgResponseTimeChart"></canvas>
+    </div>
+    <div class="chart-container">
+        <h2>Load Test: Failed Requests Comparison</h2>
+        <canvas id="loadTestFailedRequestsChart"></canvas>
+    </div>
+</div>
+
+<div class="metrics">
+    <h3>Key Metrics to Highlight</h3>
+    <ul>
+        <li><strong>Execution Time:</strong> Total time taken to process all requests. Lower is better.</li>
+        <li><strong>Throughput:</strong> Number of requests processed per second. Higher is better.</li>
+        <li><strong>Scalability:</strong> How performance changes with increasing load (API calls or concurrent users). Look for flatter lines (virtual) vs steeper lines (platform).</li>
+        <li><strong>Average Response Time:</strong> Average time for a single request under load. Lower is better.</li>
+        <li><strong>Failed Requests:</strong> Number of requests that failed under load. Lower (ideally zero) is better.</li>
+        <!-- Add resource usage/thread count if you have that data -->
+    </ul>
+</div>
+
+<div class="observations">
+    <h3>Common Observations</h3>
+    <ul>
+        <li>Platform threads often show performance degradation (higher execution/response times, lower throughput, more failures) when the number of concurrent tasks exceeds the available threads in the pool.</li>
+        <li>Virtual threads tend to maintain better performance and handle much higher concurrency levels, especially for I/O-bound tasks (like network calls with delays).</li>
+        <li>The benefits of virtual threads become more apparent under higher load and/or with longer I/O delays.</li>
+        <li>Note the higher number of failed requests for Virtual Threads in some load tests – this might indicate resource contention elsewhere (e.g., network limits, server capacity) or specific implementation bottlenecks under extreme stress, rather than an inherent virtual thread issue.</li>
+    </ul>
+</div>
+
+<script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- Data Loading ---
+            Promise.all([
+                fetch('basic_test.json').then(res => res.json()),
+                fetch('scalability_test.json').then(res => res.json()),
+                fetch('load_test.json').then(res => res.json()),
+                fetch('extreme_load_test.json').then(res => res.json())
+            ]).then(([basicData, scalabilityData, loadData, extremeLoadData]) => {
+                console.log("Data loaded:", { basicData, scalabilityData, loadData, extremeLoadData });
+
+                // --- Chart Colors ---
+                const platformColor = 'rgba(255, 99, 132, 0.8)'; // Reddish
+                const virtualColor = 'rgba(54, 162, 235, 0.8)'; // Blueish
+                const platformBorderColor = 'rgba(255, 99, 132, 1)';
+                const virtualBorderColor = 'rgba(54, 162, 235, 1)';
+
+                // --- 1. Basic Execution Time Chart ---
+                const ctxBasic = document.getElementById('basicExecutionTimeChart').getContext('2d');
+                new Chart(ctxBasic, {
+                    type: 'bar',
+                    data: {
+                        labels: ['Platform Threads', 'Virtual Threads'],
+                        datasets: [{
+                            label: 'Execution Time (ms)',
+                            data: [
+                                basicData.platformThreads.executionTimeMs,
+                                basicData.virtualThreads.executionTimeMs
+                            ],
+                            backgroundColor: [platformColor, virtualColor],
+                            borderColor: [platformBorderColor, virtualBorderColor],
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                             title: { display: true, text: 'Execution Time for 50 APIs (100ms Delay)' },
+                             legend: { display: false }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: { display: true, text: 'Time (ms)' }
+                            }
+                        }
+                    }
+                });
+
+                // --- 2. Scalability Chart ---
+                const ctxScalability = document.getElementById('scalabilityChart').getContext('2d');
+                const scalabilityLabels = scalabilityData.results.map(r => r.platformThreads.apiCount); // Use API count as labels
+                const platformScalabilityTimes = scalabilityData.results.map(r => r.platformThreads.executionTimeMs);
+                const virtualScalabilityTimes = scalabilityData.results.map(r => r.virtualThreads.executionTimeMs);
+
+                new Chart(ctxScalability, {
+                    type: 'line',
+                    data: {
+                        labels: scalabilityLabels,
+                        datasets: [
+                            {
+                                label: 'Platform Threads Execution Time (ms)',
+                                data: platformScalabilityTimes,
+                                borderColor: platformBorderColor,
+                                backgroundColor: platformColor,
+                                tension: 0.1,
+                                fill: false
+                            },
+                            {
+                                label: 'Virtual Threads Execution Time (ms)',
+                                data: virtualScalabilityTimes,
+                                borderColor: virtualBorderColor,
+                                backgroundColor: virtualColor,
+                                tension: 0.1,
+                                fill: false
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            title: { display: true, text: 'Execution Time vs. Number of API Calls (100ms Delay)' },
+                            legend: { display: true, position: 'top' }
+                        },
+                        scales: {
+                            x: {
+                                title: { display: true, text: 'Number of API Calls' }
+                            },
+                            y: {
+                                beginAtZero: true,
+                                title: { display: true, text: 'Execution Time (ms)' }
+                            }
+                        }
+                    }
+                });
+
+                // --- 3. Load Test Throughput Chart ---
+                const ctxLoadThroughput = document.getElementById('loadTestThroughputChart').getContext('2d');
+                new Chart(ctxLoadThroughput, {
+                    type: 'bar',
+                    data: {
+                        labels: ['Moderate Load (100 Users)', 'Extreme Load (1000 Users)'],
+                        datasets: [
+                            {
+                                label: 'Platform Throughput (req/sec)',
+                                data: [
+                                    loadData.platformThreadsResults.throughput,
+                                    extremeLoadData.platformThreadsResults.throughput
+                                ],
+                                backgroundColor: platformColor,
+                                borderColor: platformBorderColor,
+                                borderWidth: 1
+                            },
+                            {
+                                label: 'Virtual Throughput (req/sec)',
+                                data: [
+                                    loadData.virtualThreadsResults.throughput,
+                                    extremeLoadData.virtualThreadsResults.throughput
+                                ],
+                                backgroundColor: virtualColor,
+                                borderColor: virtualBorderColor,
+                                borderWidth: 1
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                             title: { display: true, text: 'Throughput Comparison Under Load' },
+                             legend: { display: true, position: 'top' }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: { display: true, text: 'Throughput (Requests/sec)' }
+                            }
+                        }
+                    }
+                });
+
+                 // --- 4. Load Test Average Response Time Chart ---
+                const ctxLoadAvgResp = document.getElementById('loadTestAvgResponseTimeChart').getContext('2d');
+                new Chart(ctxLoadAvgResp, {
+                    type: 'bar',
+                    data: {
+                        labels: ['Moderate Load (100 Users)', 'Extreme Load (1000 Users)'],
+                        datasets: [
+                            {
+                                label: 'Platform Avg Response (ms)',
+                                data: [
+                                    loadData.platformThreadsResults.avgResponseTimeMs,
+                                    extremeLoadData.platformThreadsResults.avgResponseTimeMs
+                                ],
+                                backgroundColor: platformColor,
+                                borderColor: platformBorderColor,
+                                borderWidth: 1
+                            },
+                            {
+                                label: 'Virtual Avg Response (ms)',
+                                data: [
+                                    loadData.virtualThreadsResults.avgResponseTimeMs,
+                                    extremeLoadData.virtualThreadsResults.avgResponseTimeMs
+                                ],
+                                backgroundColor: virtualColor,
+                                borderColor: virtualBorderColor,
+                                borderWidth: 1
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                             title: { display: true, text: 'Average Response Time Under Load' },
+                             legend: { display: true, position: 'top' }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: { display: true, text: 'Avg Response Time (ms)' }
+                            }
+                        }
+                    }
+                });
+
+                 // --- 5. Load Test Failed Requests Chart ---
+                const ctxLoadFailed = document.getElementById('loadTestFailedRequestsChart').getContext('2d');
+                new Chart(ctxLoadFailed, {
+                    type: 'bar',
+                    data: {
+                        labels: ['Moderate Load (100 Users)', 'Extreme Load (1000 Users)'],
+                        datasets: [
+                            {
+                                label: 'Platform Failed Requests',
+                                data: [
+                                    loadData.platformThreadsResults.failedRequests,
+                                    extremeLoadData.platformThreadsResults.failedRequests
+                                ],
+                                backgroundColor: platformColor,
+                                borderColor: platformBorderColor,
+                                borderWidth: 1
+                            },
+                            {
+                                label: 'Virtual Failed Requests',
+                                data: [
+                                    loadData.virtualThreadsResults.failedRequests,
+                                    extremeLoadData.virtualThreadsResults.failedRequests
+                                ],
+                                backgroundColor: virtualColor,
+                                borderColor: virtualBorderColor,
+                                borderWidth: 1
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                             title: { display: true, text: 'Failed Requests Under Load' },
+                             legend: { display: true, position: 'top' }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: { display: true, text: 'Number of Failed Requests' }
+                            }
+                        }
+                    }
+                });
+
+
+            }).catch(error => {
+                console.error("Error loading test data:", error);
+                alert("Error loading JSON data. Make sure the JSON files are in the same directory and are valid. Check the console for details.");
+            });
+        });
+    </script>
+</body>
+</html>
